@@ -240,6 +240,7 @@ body {
   flex-shrink: 0; z-index: 20;
 }
 .topbar-left { display: flex; align-items: center; gap: 12px; }
+.tb-btn-menu { display: none; }
 .model-pill {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 14px; border-radius: 999px;
@@ -859,8 +860,9 @@ body {
 .bubble em { font-style: italic; color: var(--tx-2); }
 .bubble a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .bubble code { font-family: var(--f-mono); font-size: 0.83em; background: var(--accent-dim); border: 1px solid var(--accent-bdr); padding: 2px 6px; border-radius: 4px; color: var(--accent); }
-.bubble pre { background: #1e1e2e; border: 1px solid var(--bg-border); border-radius: var(--r-md); padding: 18px 20px; overflow-x: auto; margin: 14px 0; }
-.bubble pre code { background: transparent; border: none; color: #cdd6f4; padding: 0; font-size: 0.84em; line-height: 1.65; }
+.bubble pre { background: #1e1e2e; border: 1px solid var(--bg-border); border-radius: var(--r-md); padding: 18px 20px; overflow-x: auto; margin: 14px 0; max-width: 100%; -webkit-overflow-scrolling: touch; }
+.bubble pre code { background: transparent; border: none; color: #cdd6f4; padding: 0; font-size: 0.84em; line-height: 1.65; display: inline-block; min-width: 100%; white-space: pre; overflow-wrap: normal; word-break: normal; font-family: var(--f-mono), "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", monospace; font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; tab-size: 2; }
+.bubble pre.ascii-box code { padding-right: 2ch; letter-spacing: 0; line-height: 1.7; }
 .bubble .table-wrap { overflow-x: auto; margin: 14px 0; border-radius: var(--r-sm); }
 .bubble table { width: 100%; border-collapse: collapse; font-size: 0.86em; border: 1px solid var(--bg-border); border-radius: var(--r-sm); overflow: hidden; }
 .bubble th,.bubble td { border: 1px solid var(--bg-border); padding: 10px 16px; text-align: left; }
@@ -1049,16 +1051,133 @@ textarea#user-input::placeholder { color: var(--tx-4); }
 .th-dots span:nth-child(3) { animation-delay: 0.36s; }
 @keyframes th-db { 0%,80%,100%{transform:translateY(0);opacity:0.35} 40%{transform:translateY(-4px);opacity:1} }
 
-@media (max-width: 900px) {
-  .sidebar { display: none; }
-  .doc-sidebar { display: none; }
-  .main { --doc-offset: 0px !important; }
-  .topbar { padding: 0 14px; }
-  .upload-inner { width: calc(100% - 28px); padding: 14px 0 16px; }
-  .msgs { padding: 28px 10px 18px; }
-  .input-zone { padding: 12px 14px 18px; }
+.mobile-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 12, 20, 0.46);
+  backdrop-filter: blur(1px);
+  z-index: 70;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
 }
-@media (max-width: 720px) { .sidebar { display: none; } }
+
+@media (max-width: 900px) {
+  .mobile-overlay { display: block; }
+  body.mobile-sidebar-open .mobile-overlay,
+  body.mobile-doc-open .mobile-overlay {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .main {
+    --doc-offset: 0px !important;
+    width: 100%;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: min(86vw, 320px);
+    min-width: 0;
+    height: 100dvh;
+    z-index: 80;
+    transform: translateX(-104%);
+    transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 18px 0 36px rgba(0, 0, 0, 0.22);
+    display: flex;
+  }
+  body.mobile-sidebar-open .sidebar { transform: translateX(0); }
+
+  .doc-sidebar {
+    position: fixed;
+    top: 56px;
+    right: 0;
+    height: calc(100dvh - 56px);
+    width: min(90vw, 340px);
+    min-width: 0;
+    z-index: 85;
+    transform: translateX(105%);
+    transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: -18px 0 36px rgba(0, 0, 0, 0.2);
+    display: flex;
+  }
+  .doc-sidebar.collapsed {
+    width: min(90vw, 340px);
+    min-width: 0;
+  }
+  body.mobile-doc-open .doc-sidebar { transform: translateX(0); }
+
+  .tb-btn-menu { display: inline-flex; }
+  .topbar {
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .topbar-left { min-width: 0; gap: 8px; }
+  .topbar-breadcrumb { display: none; }
+
+  .upload-inner { width: calc(100% - 20px); padding: 12px 0 14px; }
+  .msgs {
+    max-width: 100%;
+    padding: 20px 10px 16px;
+  }
+  .empty-state {
+    min-height: 56vh;
+    padding: 26px 8px 16px;
+  }
+  .sg-grid {
+    grid-template-columns: 1fr;
+    max-width: 100%;
+  }
+  .msg-row.user .bubble { max-width: 92%; }
+  .bubble { line-height: 1.74; }
+
+  .input-zone {
+    padding: 10px 10px calc(env(safe-area-inset-bottom) + 12px);
+  }
+  .input-wrap { max-width: 100%; }
+  .input-toolbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 10px 12px 12px;
+  }
+  .toolbar-left {
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    gap: 6px;
+    padding-bottom: 2px;
+  }
+  .toolbar-left::-webkit-scrollbar { display: none; }
+  .tool-chip { white-space: nowrap; flex-shrink: 0; }
+}
+
+@media (max-width: 560px) {
+  .topbar-right .tb-btn {
+    height: 32px;
+    padding: 0 10px;
+    font-size: 0.74rem;
+  }
+  .topbar-right .tb-btn .tb-label { display: none; }
+  .model-pill {
+    max-width: calc(100vw - 148px);
+    padding: 6px 10px;
+  }
+  .model-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 110px;
+  }
+  .input-footer {
+    font-size: 0.66rem;
+    line-height: 1.4;
+    padding: 8px 10px 0;
+  }
+}
 
 /* ══ MINDMAP VIEW ════════════════════════════════════════════ */
 #main-mindmap {
@@ -1661,6 +1780,7 @@ textarea#user-input::placeholder { color: var(--tx-4); }
 <body>
 
 <div class="toast" id="toast">Đã sao chép</div>
+<div class="mobile-overlay" id="mobile-overlay" onclick="closeMobilePanels()"></div>
 
 <!-- LEFT SIDEBAR -->
 <aside class="sidebar">
@@ -1677,7 +1797,7 @@ textarea#user-input::placeholder { color: var(--tx-4); }
         <span class="logo-sub">Enterprise</span>
       </div>
     </div>
-    <button class="icon-btn" title="Đóng sidebar"><i class="fas fa-sidebar" style="font-size:0.8rem"></i></button>
+    <button class="icon-btn" title="Đóng sidebar" onclick="toggleLeftSidebar(false)"><i class="fas fa-sidebar" style="font-size:0.8rem"></i></button>
   </div>
 
   <div class="sidebar-new-chat">
@@ -1757,6 +1877,9 @@ textarea#user-input::placeholder { color: var(--tx-4); }
 
   <header class="topbar mm-topbar">
     <div class="topbar-left">
+      <button class="tb-btn tb-btn-menu" id="toggle-left-sidebar-btn" onclick="toggleLeftSidebar()" title="Mở menu">
+        <i class="fas fa-bars"></i>
+      </button>
       <div class="model-pill" id="model-pill" onclick="toggleModelDropdown(event)">
         <div id="model-pill-dot" style="width:7px;height:7px;border-radius:50%;background:#16a34a;box-shadow:0 0 5px #16a34a;flex-shrink:0"></div>
         <span class="model-name" id="model-pill-name">GPT-4o Mini</span>
@@ -1779,7 +1902,8 @@ textarea#user-input::placeholder { color: var(--tx-4); }
         <span id="topbar-doc-count" style="display:none;font-size:0.65rem;font-weight:700;background:var(--accent);color:white;padding:1px 5px;border-radius:999px;margin-left:2px;"></span>
       </button>
       <button class="tb-btn primary" onclick="newChat()">
-        <i class="fas fa-plus"></i> Chat mới
+        <i class="fas fa-plus"></i>
+        <span class="tb-label">Chat mới</span>
       </button>
     </div>
   </header>
@@ -1957,6 +2081,9 @@ textarea#user-input::placeholder { color: var(--tx-4); }
   <!-- Topbar -->
   <header class="topbar">
     <div class="topbar-left">
+      <button class="tb-btn tb-btn-menu" onclick="toggleLeftSidebar()" title="Mở menu">
+        <i class="fas fa-bars"></i>
+      </button>
       <!-- Collapse left panels button -->
       <button class="tb-btn" id="mm-collapse-btn" onclick="mmToggleLeftPanels()" title="Ẩn/hiện bảng điều hướng">
         <i class="fas fa-sidebar" style="font-size:0.82rem"></i>
@@ -1969,7 +2096,8 @@ textarea#user-input::placeholder { color: var(--tx-4); }
     </div>
     <div class="topbar-right">
       <button class="tb-btn" onclick="mmAutoArrange()" title="Sắp xếp lại sơ đồ cân đối">
-        <i class="fas fa-wand-magic-sparkles" style="font-size:0.72rem"></i> Cân đối lại
+        <i class="fas fa-wand-magic-sparkles" style="font-size:0.72rem"></i>
+        <span class="tb-label">Cân đối lại</span>
       </button>
       <!-- Upload removed: mindmap now created via chat agent -->
     </div>
@@ -2155,6 +2283,22 @@ const UI_SPEED = {
   thinking: { toolStepDelayMs: 60, toolGapDelayMs: 20 }
 };
 
+function isMobileViewport() {
+  return window.matchMedia('(max-width: 900px)').matches;
+}
+
+function closeMobilePanels() {
+  document.body.classList.remove('mobile-sidebar-open', 'mobile-doc-open');
+}
+
+function toggleLeftSidebar(forceOpen = null) {
+  if (!isMobileViewport()) return;
+  const current = document.body.classList.contains('mobile-sidebar-open');
+  const next = (forceOpen === null) ? !current : !!forceOpen;
+  document.body.classList.toggle('mobile-sidebar-open', next);
+  if (next) document.body.classList.remove('mobile-doc-open');
+}
+
 function shouldSkipTypingAnimation(text) {
   return String(text || '').length >= UI_SPEED.fallback.skipTypingOverChars;
 }
@@ -2264,6 +2408,24 @@ function quickCreateSlide() {
 
 // ── RIGHT DOC SIDEBAR ─────────────────────────────────────────
 function toggleDocSidebar() {
+  if (isMobileViewport()) {
+    const sidebar = document.getElementById('doc-sidebar');
+    const expandBtn = document.getElementById('ds-expand-btn');
+    const actBtns = sidebar ? sidebar.querySelector('.ds-actions') : null;
+    const title = sidebar ? sidebar.querySelector('.ds-title') : null;
+    const searchWrap = document.getElementById('ds-search-wrap');
+    if (sidebar) sidebar.classList.remove('collapsed');
+    [actBtns, title, searchWrap].forEach(el => { if (el) el.style.display = ''; });
+    if (expandBtn) expandBtn.style.display = 'none';
+
+    const next = !document.body.classList.contains('mobile-doc-open');
+    document.body.classList.toggle('mobile-doc-open', next);
+    if (next) document.body.classList.remove('mobile-sidebar-open');
+    const toggleBtn = document.getElementById('toggle-doc-sidebar-btn');
+    if (toggleBtn) toggleBtn.classList.toggle('active', next);
+    return;
+  }
+
   const sidebar = document.getElementById('doc-sidebar');
   const mainShell = document.getElementById('main-shell');
   const toggleBtn = document.getElementById('toggle-doc-sidebar-btn');
@@ -3322,6 +3484,7 @@ function newChat() {
   msgsEl.innerHTML=EMPTY_HTML();
   setSessionTitle('Chat mới');
   setActiveSessionInSidebar();
+  closeMobilePanels();
 }
 
 async function sendMessage() {
@@ -3421,7 +3584,42 @@ function setLoading(on) {
   setTypingRowVisible(on);
 }
 
+function normalizeAsciiCodeBlocks(rootEl) {
+  if (!rootEl) return;
+  const blocks = rootEl.querySelectorAll('pre > code');
+  blocks.forEach((codeEl) => {
+    const raw = (codeEl.textContent || '').replace(/\r\n/g, '\n');
+    if (!raw.trim()) return;
+
+    const hasBoxChars = /[┌┐└┘├┤│─╔╗╚╝╠╣═]/.test(raw);
+    const framedLineCount = (raw.match(/^\s*[|│║].*[|│║]\s*$/gm) || []).length;
+    if (!hasBoxChars && framedLineCount < 2) return;
+
+    const lines = raw.split('\n');
+    const targetWidth = lines.reduce((max, line) => Math.max(max, line.length), 0);
+    if (targetWidth <= 0) return;
+
+    const normalized = lines.map((line) => {
+      const m = line.match(/^(\s*[|│║])(.*?)([|│║])(\s*)$/);
+      if (!m) return line;
+
+      const head = m[1];
+      const body = m[2];
+      const tail = m[3];
+      const trailing = m[4] || '';
+      const visibleLen = (head + body + tail).length + trailing.length;
+      if (visibleLen >= targetWidth) return line;
+      return `${head}${body}${' '.repeat(targetWidth - visibleLen)}${tail}${trailing}`;
+    }).join('\n');
+
+    if (normalized !== raw) codeEl.textContent = normalized;
+    codeEl.classList.add('ascii-box');
+    if (codeEl.parentElement) codeEl.parentElement.classList.add('ascii-box');
+  });
+}
+
 function renderMath(el) {
+  normalizeAsciiCodeBlocks(el);
   if(typeof renderMathInElement==='undefined') return;
   renderMathInElement(el,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\[',right:'\\]',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false}],throwOnError:false,strict:false});
 }
@@ -3907,6 +4105,12 @@ async function initChatSidebarSessions() {
   newChat();
 }
 initChatSidebarSessions();
+window.addEventListener('resize', () => {
+  if (!isMobileViewport()) closeMobilePanels();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeMobilePanels();
+});
 
 // ══════════════════════════════════════════════════════════════
 //  MINDMAP — View switching & API
@@ -3933,6 +4137,7 @@ function switchView(v) {
   document.querySelectorAll('.nav-item[data-v]').forEach(n =>
     n.classList.toggle('active', n.dataset.v === v)
   );
+  closeMobilePanels();
   if (isMm) { mmInitInteractions(); mmLoadDocs(); }
 }
 
