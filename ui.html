@@ -925,6 +925,31 @@ body {
 .input-ta-wrap { padding: 16px 18px 4px; }
 textarea#user-input { width: 100%; border: none; outline: none; resize: none; font-size: 0.9375rem; font-family: var(--f-ui); line-height: 1.7; font-weight: 400; color: var(--tx-1); background: transparent; min-height: 28px; max-height: 220px; display: block; }
 textarea#user-input::placeholder { color: var(--tx-4); }
+
+/* ── Image Preview Bar (chat vision) ── */
+.img-preview-bar { display: flex; gap: 8px; padding: 10px 18px 0; flex-wrap: wrap; }
+.img-preview-bar:empty { display: none; }
+.img-preview-item {
+  position: relative; width: 64px; height: 64px; border-radius: 10px; overflow: hidden;
+  border: 1.5px solid var(--bg-border); background: var(--bg-panel); flex-shrink: 0;
+}
+.img-preview-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.img-preview-item .img-remove {
+  position: absolute; top: 2px; right: 2px; width: 18px; height: 18px;
+  background: rgba(0,0,0,0.55); color: white; border: none; border-radius: 50%;
+  font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.15s;
+}
+.img-preview-item:hover .img-remove { opacity: 1; }
+.img-preview-item.uploading::after {
+  content: ''; position: absolute; inset: 0; background: rgba(255,255,255,0.6);
+  display: flex; align-items: center; justify-content: center;
+}
+.img-preview-item .img-spinner {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.5);
+}
+.img-preview-item .img-spinner i { color: var(--accent); font-size: 14px; }
 .input-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 14px; }
 .toolbar-left { display: flex; gap: 7px; }
 .tool-chip { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--bg-border); background: transparent; color: var(--tx-3); font-size: 0.75rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.15s; font-family: var(--f-ui); }
@@ -2044,13 +2069,18 @@ textarea#user-input::placeholder { color: var(--tx-4); }
     <div class="input-wrap">
       <div class="input-box">
         <div class="scoped-files-bar" id="scoped-files-bar"></div>
+        <div class="img-preview-bar" id="img-preview-bar"></div>
         <div class="input-ta-wrap">
           <textarea id="user-input" rows="1" placeholder="Nhập tin nhắn..."></textarea>
         </div>
+        <input type="file" id="img-input" accept=".jpg,.jpeg,.png,.gif,.webp,.bmp" multiple style="display:none">
         <div class="input-toolbar">
           <div class="toolbar-left">
             <button class="tool-chip on" onclick="document.getElementById('file-input').click()">
               <i class="fas fa-cloud-arrow-up" style="font-size:0.72rem;"></i> Upload
+            </button>
+            <button class="tool-chip on" onclick="document.getElementById('img-input').click()">
+              <i class="fas fa-image" style="font-size:0.72rem;"></i> Ảnh
             </button>
             <button class="tool-chip">
               <i class="fas fa-globe" style="font-size:0.72rem;"></i> Web
@@ -3487,17 +3517,112 @@ function newChat() {
   closeMobilePanels();
 }
 
+// ── Image upload for chat vision ──
+const MAX_CHAT_IMAGES = 3;
+const imgInput = document.getElementById('img-input');
+const imgPreviewBar = document.getElementById('img-preview-bar');
+let pendingImages = []; // [{id, file, objectUrl}]
+
+imgInput.addEventListener('change', e => {
+  const files = Array.from(e.target.files);
+  imgInput.value = '';
+  for (const f of files) {
+    if (pendingImages.length >= MAX_CHAT_IMAGES) {
+      showToast(`Tối đa ${MAX_CHAT_IMAGES} ảnh mỗi tin nhắn`);
+      break;
+    }
+    addImagePreview(f);
+  }
+});
+
+function addImagePreview(file) {
+  const objectUrl = URL.createObjectURL(file);
+  const idx = pendingImages.length;
+  const item = document.createElement('div');
+  item.className = 'img-preview-item uploading';
+  item.innerHTML = `<img src="${objectUrl}"><div class="img-spinner"><i class="fas fa-spinner fa-spin"></i></div><button class="img-remove" onclick="removeImage(${idx})"><i class="fas fa-xmark"></i></button>`;
+  imgPreviewBar.appendChild(item);
+  const entry = { id: null, file, objectUrl, el: item };
+  pendingImages.push(entry);
+
+  // Upload ngay lập tức
+  const fd = new FormData();
+  fd.append('file', file);
+  if (currentSessionId) fd.append('session_id', currentSessionId);
+  fetch(`${BASE_URL}/api/chat/image`, {
+    method: 'POST',
+    headers: { 'X-Tenant-ID': TENANT_ID, 'X-Role-ID': ROLE_ID },
+    body: fd,
+  }).then(r => r.json()).then(data => {
+    entry.id = data.image_id;
+    item.classList.remove('uploading');
+    item.querySelector('.img-spinner')?.remove();
+  }).catch(err => {
+    console.error('Image upload error:', err);
+    item.classList.remove('uploading');
+    item.classList.add('error');
+    item.querySelector('.img-spinner')?.remove();
+    showToast('Lỗi tải ảnh: ' + file.name);
+  });
+}
+
+function removeImage(idx) {
+  if (pendingImages[idx]) {
+    URL.revokeObjectURL(pendingImages[idx].objectUrl);
+    pendingImages[idx].el.remove();
+    pendingImages.splice(idx, 1);
+    // Re-render để fix index
+    renderImagePreviews();
+  }
+}
+
+function renderImagePreviews() {
+  imgPreviewBar.innerHTML = '';
+  pendingImages.forEach((entry, i) => {
+    const item = document.createElement('div');
+    item.className = 'img-preview-item' + (entry.id ? '' : ' uploading');
+    item.innerHTML = `<img src="${entry.objectUrl}"><button class="img-remove" onclick="removeImage(${i})"><i class="fas fa-xmark"></i></button>`;
+    if (!entry.id) item.innerHTML += '<div class="img-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+    imgPreviewBar.appendChild(item);
+    entry.el = item;
+  });
+}
+
+// Paste ảnh từ clipboard (Ctrl+V)
+document.addEventListener('paste', e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (file && pendingImages.length < MAX_CHAT_IMAGES) addImagePreview(file);
+      else if (pendingImages.length >= MAX_CHAT_IMAGES) showToast(`Tối đa ${MAX_CHAT_IMAGES} ảnh mỗi tin nhắn`);
+      break;
+    }
+  }
+});
+
+function consumeImageIds() {
+  const ids = pendingImages.filter(e => e.id).map(e => e.id);
+  pendingImages.forEach(e => URL.revokeObjectURL(e.objectUrl));
+  pendingImages = [];
+  imgPreviewBar.innerHTML = '';
+  return ids;
+}
+
 async function sendMessage() {
   const text=inputEl.value.trim();
   if(!text||isInFlight) return;
   const es=document.getElementById('empty-state'); if(es) es.remove();
+  const imageIds = consumeImageIds();
   addMsg(text,'user'); inputEl.value=''; inputEl.style.height='auto';
   setLoading(true); scrollBot();
   const title=text.slice(0,32)+(text.length>32?'…':'');
   setSessionTitle(title);
   try {
     const sid=await getOrCreateSession();
-    const resp=await fetch(`${BASE_URL}/api/chat/sessions/${sid}/messages`,{method:'POST',headers:{'Content-Type':'application/json','X-Tenant-ID':TENANT_ID,'X-Role-ID':ROLE_ID},body:JSON.stringify({messageText:text,stream:true,uploaded_files:sessionUploadedFiles,model:selectedModelId||undefined})});
+    const resp=await fetch(`${BASE_URL}/api/chat/sessions/${sid}/messages`,{method:'POST',headers:{'Content-Type':'application/json','X-Tenant-ID':TENANT_ID,'X-Role-ID':ROLE_ID},body:JSON.stringify({messageText:text,stream:true,uploaded_files:sessionUploadedFiles,image_ids:imageIds,model:selectedModelId||undefined})});
     if(!resp.ok) throw new Error(`Lỗi API ${resp.status}`);
     const ct=resp.headers.get('Content-Type')||'';
     if(ct.includes('text/event-stream')) {
