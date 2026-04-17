@@ -3562,49 +3562,20 @@ imgInput.addEventListener('change', e => {
 });
 
 function addImagePreview(file) {
+  // Chỉ giữ local. Upload được defer đến khi user bấm Send.
   const objectUrl = URL.createObjectURL(file);
   const idx = pendingImages.length;
   const item = document.createElement('div');
-  item.className = 'img-preview-item uploading';
-  item.innerHTML = `<img src="${objectUrl}" style="cursor:zoom-in"><div class="img-spinner"><i class="fas fa-spinner fa-spin"></i></div><button class="img-remove" onclick="event.stopPropagation();removeImage(${idx})"><i class="fas fa-xmark"></i></button>`;
+  item.className = 'img-preview-item';
+  item.innerHTML = `<img src="${objectUrl}" style="cursor:zoom-in"><button class="img-remove" onclick="event.stopPropagation();removeImage(${idx})"><i class="fas fa-xmark"></i></button>`;
   item.querySelector('img').addEventListener('click', () => window.openImageLightbox(objectUrl));
   imgPreviewBar.appendChild(item);
-  const entry = { id: null, file, objectUrl, el: item };
-  pendingImages.push(entry);
-
-  // Upload ngay lập tức
-  const fd = new FormData();
-  fd.append('file', file);
-  if (currentSessionId) fd.append('session_id', currentSessionId);
-  fetch(`${BASE_URL}/api/chat/image`, {
-    method: 'POST',
-    headers: { 'X-Tenant-ID': TENANT_ID, 'X-Role-ID': ROLE_ID },
-    body: fd,
-  }).then(r => r.json()).then(data => {
-    entry.id = data.image_id;
-    item.classList.remove('uploading');
-    item.querySelector('.img-spinner')?.remove();
-  }).catch(err => {
-    console.error('Image upload error:', err);
-    item.classList.remove('uploading');
-    item.classList.add('error');
-    item.querySelector('.img-spinner')?.remove();
-    showToast('Lỗi tải ảnh: ' + file.name);
-  });
+  pendingImages.push({ file, objectUrl, el: item });
 }
 
 function removeImage(idx) {
   const entry = pendingImages[idx];
   if (!entry) return;
-
-  // Xóa khỏi DB nếu đã upload (có id). Best-effort — không chặn UI.
-  if (entry.id) {
-    fetch(`${BASE_URL}/api/chat/image/${entry.id}`, {
-      method: 'DELETE',
-      headers: { 'X-Tenant-ID': TENANT_ID, 'X-Role-ID': ROLE_ID },
-    }).catch(err => console.warn('Image delete failed:', err));
-  }
-
   URL.revokeObjectURL(entry.objectUrl);
   entry.el.remove();
   pendingImages.splice(idx, 1);
@@ -3615,9 +3586,8 @@ function renderImagePreviews() {
   imgPreviewBar.innerHTML = '';
   pendingImages.forEach((entry, i) => {
     const item = document.createElement('div');
-    item.className = 'img-preview-item' + (entry.id ? '' : ' uploading');
+    item.className = 'img-preview-item';
     item.innerHTML = `<img src="${entry.objectUrl}" style="cursor:zoom-in"><button class="img-remove" onclick="event.stopPropagation();removeImage(${i})"><i class="fas fa-xmark"></i></button>`;
-    if (!entry.id) item.innerHTML += '<div class="img-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
     item.querySelector('img').addEventListener('click', () => window.openImageLightbox(entry.objectUrl));
     imgPreviewBar.appendChild(item);
     entry.el = item;
@@ -3639,28 +3609,54 @@ document.addEventListener('paste', e => {
   }
 });
 
-function consumePendingImages() {
-  // KHÔNG revoke objectUrl ở đây — bubble + lightbox còn dùng. Revoke khi clear messages.
-  const ids = pendingImages.filter(e => e.id).map(e => e.id);
-  const thumbs = pendingImages
-    .filter(e => e.id)
-    .map(e => ({ objectUrl: e.objectUrl, filename: e.file?.name || '' }));
+function snapshotPendingImages() {
+  // Lấy snapshot pendingImages hiện tại, trả thumbs + list file để upload.
+  // KHÔNG revoke objectUrl ở đây — bubble + lightbox còn dùng.
+  const snapshot = pendingImages.slice();
   pendingImages = [];
   imgPreviewBar.innerHTML = '';
-  return { ids, thumbs };
+  return snapshot;
+}
+
+async function uploadImagesForSession(snapshot, sessionId) {
+  // Upload song song. Trả list image_id theo đúng thứ tự.
+  if (!snapshot.length) return [];
+  const tasks = snapshot.map(async (entry) => {
+    const fd = new FormData();
+    fd.append('file', entry.file);
+    fd.append('session_id', sessionId);
+    const r = await fetch(`${BASE_URL}/api/chat/image`, {
+      method: 'POST',
+      headers: { 'X-Tenant-ID': TENANT_ID, 'X-Role-ID': ROLE_ID },
+      body: fd,
+    });
+    if (!r.ok) throw new Error(`Upload ${entry.file.name} thất bại (${r.status})`);
+    const data = await r.json();
+    return data.image_id;
+  });
+  return Promise.all(tasks);
 }
 
 async function sendMessage() {
   const text=inputEl.value.trim();
   if(!text||isInFlight) return;
   const es=document.getElementById('empty-state'); if(es) es.remove();
-  const { ids: imageIds, thumbs: imageThumbs } = consumePendingImages();
+  const imageSnapshot = snapshotPendingImages();
+  const imageThumbs = imageSnapshot.map(e => ({ objectUrl: e.objectUrl, filename: e.file.name }));
   addMsg(text,'user',imageThumbs); inputEl.value=''; inputEl.style.height='auto';
   setLoading(true); scrollBot();
   const title=text.slice(0,32)+(text.length>32?'…':'');
   setSessionTitle(title);
   try {
     const sid=await getOrCreateSession();
+    let imageIds=[];
+    if (imageSnapshot.length) {
+      try { imageIds = await uploadImagesForSession(imageSnapshot, sid); }
+      catch (err) {
+        console.error('Image upload failed:', err);
+        showToast('Lỗi upload ảnh — gửi không kèm ảnh');
+      }
+    }
     const resp=await fetch(`${BASE_URL}/api/chat/sessions/${sid}/messages`,{method:'POST',headers:{'Content-Type':'application/json','X-Tenant-ID':TENANT_ID,'X-Role-ID':ROLE_ID},body:JSON.stringify({messageText:text,stream:true,uploaded_files:sessionUploadedFiles,image_ids:imageIds,model:selectedModelId||undefined})});
     if(!resp.ok) throw new Error(`Lỗi API ${resp.status}`);
     const ct=resp.headers.get('Content-Type')||'';
