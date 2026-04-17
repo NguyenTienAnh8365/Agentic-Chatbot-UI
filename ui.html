@@ -3566,7 +3566,8 @@ function addImagePreview(file) {
   const idx = pendingImages.length;
   const item = document.createElement('div');
   item.className = 'img-preview-item uploading';
-  item.innerHTML = `<img src="${objectUrl}"><div class="img-spinner"><i class="fas fa-spinner fa-spin"></i></div><button class="img-remove" onclick="removeImage(${idx})"><i class="fas fa-xmark"></i></button>`;
+  item.innerHTML = `<img src="${objectUrl}" style="cursor:zoom-in"><div class="img-spinner"><i class="fas fa-spinner fa-spin"></i></div><button class="img-remove" onclick="event.stopPropagation();removeImage(${idx})"><i class="fas fa-xmark"></i></button>`;
+  item.querySelector('img').addEventListener('click', () => window.openImageLightbox(objectUrl));
   imgPreviewBar.appendChild(item);
   const entry = { id: null, file, objectUrl, el: item };
   pendingImages.push(entry);
@@ -3593,13 +3594,21 @@ function addImagePreview(file) {
 }
 
 function removeImage(idx) {
-  if (pendingImages[idx]) {
-    URL.revokeObjectURL(pendingImages[idx].objectUrl);
-    pendingImages[idx].el.remove();
-    pendingImages.splice(idx, 1);
-    // Re-render để fix index
-    renderImagePreviews();
+  const entry = pendingImages[idx];
+  if (!entry) return;
+
+  // Xóa khỏi DB nếu đã upload (có id). Best-effort — không chặn UI.
+  if (entry.id) {
+    fetch(`${BASE_URL}/api/chat/image/${entry.id}`, {
+      method: 'DELETE',
+      headers: { 'X-Tenant-ID': TENANT_ID, 'X-Role-ID': ROLE_ID },
+    }).catch(err => console.warn('Image delete failed:', err));
   }
+
+  URL.revokeObjectURL(entry.objectUrl);
+  entry.el.remove();
+  pendingImages.splice(idx, 1);
+  renderImagePreviews();
 }
 
 function renderImagePreviews() {
@@ -3607,8 +3616,9 @@ function renderImagePreviews() {
   pendingImages.forEach((entry, i) => {
     const item = document.createElement('div');
     item.className = 'img-preview-item' + (entry.id ? '' : ' uploading');
-    item.innerHTML = `<img src="${entry.objectUrl}"><button class="img-remove" onclick="removeImage(${i})"><i class="fas fa-xmark"></i></button>`;
+    item.innerHTML = `<img src="${entry.objectUrl}" style="cursor:zoom-in"><button class="img-remove" onclick="event.stopPropagation();removeImage(${i})"><i class="fas fa-xmark"></i></button>`;
     if (!entry.id) item.innerHTML += '<div class="img-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+    item.querySelector('img').addEventListener('click', () => window.openImageLightbox(entry.objectUrl));
     imgPreviewBar.appendChild(item);
     entry.el = item;
   });
