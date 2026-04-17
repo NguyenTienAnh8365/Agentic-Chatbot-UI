@@ -950,6 +950,32 @@ textarea#user-input::placeholder { color: var(--tx-4); }
   background: rgba(255,255,255,0.5);
 }
 .img-preview-item .img-spinner i { color: var(--accent); font-size: 14px; }
+
+/* ── Bubble images (hiển thị ảnh trong user message) ── */
+.bubble-images { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.bubble-img {
+  width: 140px; height: 140px; border-radius: 8px; overflow: hidden; cursor: zoom-in;
+  border: 1px solid var(--bg-border); background: var(--bg-panel); flex-shrink: 0;
+  transition: transform 0.12s;
+}
+.bubble-img:hover { transform: scale(1.02); }
+.bubble-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bubble-img.loading { display: flex; align-items: center; justify-content: center; color: var(--tx-4); }
+
+/* ── Image lightbox ── */
+.img-lightbox {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999;
+  display: none; align-items: center; justify-content: center; padding: 40px;
+  cursor: zoom-out; backdrop-filter: blur(4px);
+}
+.img-lightbox.open { display: flex; }
+.img-lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+.img-lightbox-close {
+  position: absolute; top: 20px; right: 24px; width: 40px; height: 40px;
+  background: rgba(255,255,255,0.12); color: white; border: none; border-radius: 50%;
+  cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center;
+}
+.img-lightbox-close:hover { background: rgba(255,255,255,0.22); }
 .input-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 14px; }
 .toolbar-left { display: flex; gap: 7px; }
 .tool-chip { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--bg-border); background: transparent; color: var(--tx-3); font-size: 0.75rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.15s; font-family: var(--f-ui); }
@@ -3276,7 +3302,7 @@ function renderSessionMessages(messages = []) {
   if (messages.length && empty) empty.remove();
   messages.forEach((m) => {
     if (!m || !m.content) return;
-    if (m.role === 'user') addMsg(m.content, 'user');
+    if (m.role === 'user') addMsg(m.content, 'user', m.images || null);
     if (m.role === 'assistant') addMsg(m.content, 'bot');
   });
   setLoading(false);
@@ -3603,20 +3629,23 @@ document.addEventListener('paste', e => {
   }
 });
 
-function consumeImageIds() {
+function consumePendingImages() {
+  // KHÔNG revoke objectUrl ở đây — bubble + lightbox còn dùng. Revoke khi clear messages.
   const ids = pendingImages.filter(e => e.id).map(e => e.id);
-  pendingImages.forEach(e => URL.revokeObjectURL(e.objectUrl));
+  const thumbs = pendingImages
+    .filter(e => e.id)
+    .map(e => ({ objectUrl: e.objectUrl, filename: e.file?.name || '' }));
   pendingImages = [];
   imgPreviewBar.innerHTML = '';
-  return ids;
+  return { ids, thumbs };
 }
 
 async function sendMessage() {
   const text=inputEl.value.trim();
   if(!text||isInFlight) return;
   const es=document.getElementById('empty-state'); if(es) es.remove();
-  const imageIds = consumeImageIds();
-  addMsg(text,'user'); inputEl.value=''; inputEl.style.height='auto';
+  const { ids: imageIds, thumbs: imageThumbs } = consumePendingImages();
+  addMsg(text,'user',imageThumbs); inputEl.value=''; inputEl.style.height='auto';
   setLoading(true); scrollBot();
   const title=text.slice(0,32)+(text.length>32?'…':'');
   setSessionTitle(title);
@@ -3841,14 +3870,19 @@ function createTextStreamRenderer(bubble, opts={}) {
   };
 }
 
-function addMsg(content,role) {
+function addMsg(content,role,images) {
   const tr=document.getElementById('typing-row');
   const row=document.createElement('div'); row.className=`msg-row ${role}`;
   const av=document.createElement('div'); av.className=`avatar ${role}`;
   av.innerHTML=role==='bot'?BOT_AV:`<i class="fas fa-user" style="font-size:11px;color:var(--tx-3)"></i>`;
   const body=document.createElement('div'); body.className='msg-body';
   const bubble=document.createElement('div'); bubble.className='bubble';
-  if(role==='user') bubble.innerText=content;
+  if(role==='user') {
+    if(images && images.length) renderBubbleImages(bubble, images);
+    const textEl = document.createElement('div');
+    textEl.innerText = content;
+    bubble.appendChild(textEl);
+  }
   else{bubble.innerHTML=DOMPurify.sanitize(mathSafeParse(content));renderMath(bubble);}
   body.appendChild(bubble);
   if(role==='bot') body.appendChild(makeActions(content));
@@ -4878,6 +4912,69 @@ function _eh(s) {
 
 // Init mindmap interactions after all mindmap state is declared.
 mmInitInteractions();
+
+// ── Image lightbox ─────────────────────────────────────────────
+(function () {
+  const box = document.createElement('div');
+  box.className = 'img-lightbox';
+  box.innerHTML = '<button class="img-lightbox-close" aria-label="Đóng"><i class="fas fa-xmark"></i></button><img alt="">';
+  document.body.appendChild(box);
+  const imgEl = box.querySelector('img');
+
+  function close() { box.classList.remove('open'); imgEl.src = ''; }
+  box.addEventListener('click', (e) => {
+    if (e.target === box || e.target.closest('.img-lightbox-close')) close();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && box.classList.contains('open')) close();
+  });
+
+  window.openImageLightbox = function (src) {
+    imgEl.src = src;
+    box.classList.add('open');
+  };
+})();
+
+// Fetch ảnh từ backend với auth headers → blob URL (để <img> hiển thị được)
+const _imgBlobCache = new Map();
+async function fetchImageBlobUrl(imageId) {
+  if (_imgBlobCache.has(imageId)) return _imgBlobCache.get(imageId);
+  const p = fetch(`${BASE_URL}/api/chat/image/${imageId}`, {
+    headers: { 'X-Tenant-ID': TENANT_ID, 'X-Role-ID': ROLE_ID },
+  }).then(r => {
+    if (!r.ok) throw new Error(`image ${imageId} status ${r.status}`);
+    return r.blob();
+  }).then(b => URL.createObjectURL(b));
+  _imgBlobCache.set(imageId, p);
+  return p;
+}
+
+// Render thumbnails vào 1 container; imgs = [{objectUrl?|image_id, filename?}]
+function renderBubbleImages(container, imgs) {
+  if (!imgs || !imgs.length) return;
+  const row = document.createElement('div');
+  row.className = 'bubble-images';
+  for (const it of imgs) {
+    const wrap = document.createElement('div');
+    wrap.className = 'bubble-img';
+    if (it.objectUrl) {
+      wrap.innerHTML = `<img src="${it.objectUrl}" alt="${_eh(it.filename || '')}">`;
+      wrap.addEventListener('click', () => window.openImageLightbox(it.objectUrl));
+    } else if (it.image_id) {
+      wrap.classList.add('loading');
+      wrap.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      fetchImageBlobUrl(it.image_id).then(url => {
+        wrap.classList.remove('loading');
+        wrap.innerHTML = `<img src="${url}" alt="${_eh(it.filename || '')}">`;
+        wrap.addEventListener('click', () => window.openImageLightbox(url));
+      }).catch(() => {
+        wrap.innerHTML = '<i class="fas fa-image" style="color:var(--tx-4)"></i>';
+      });
+    }
+    row.appendChild(wrap);
+  }
+  container.appendChild(row);
+}
 </script>
 </body>
 </html>
